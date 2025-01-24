@@ -1,6 +1,11 @@
 <?php
 session_start();
 
+require 'vendor/autoload.php';
+
+use SendGrid\Mail\Mail;
+use SendGrid\Mail\From;
+
 $pdo = new PDO('mysql:host=localhost;dbname=2fa_nettside', 'root', '');
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
@@ -17,11 +22,34 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $user = $stmt->fetch();
 
     if ($user && password_verify($password, $user['password'])) {
-        $_SESSION['email'] = $email;
-        $_SESSION['username'] = $user['username'];
+        $code = rand(100000, 999999);
 
-        header("Location: dashboard.php");
-        exit();
+        $stmt = $pdo->prepare("INSERT INTO `2fa_code` (user_id, code, expired_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))");
+        $stmt->execute([$user['id'], $code]);
+
+        $stmt = $pdo->prepare("SELECT sendgrid_api_key FROM API WHERE id = 1");
+        $stmt->execute();
+        $settings = $stmt->fetch();
+        $sendgrid_api_key = $settings['sendgrid_api_key'];
+
+        $mail = new Mail();
+        $mail->setFrom(new From('mathiashansen2007@gmail.com', "2FA"));
+        $mail->setSubject('Din 2FA-kode');
+        $mail->addTo($email);
+        $mail->addContent("text/plain", "Din 2FA-kode er: $code");
+
+        $sendgrid = new \SendGrid($sendgrid_api_key);
+        try {
+            $response = $sendgrid->send($mail);
+            echo "En e-post med 2FA-kode har blitt sendt!";
+
+            $_SESSION['email'] = $email;
+
+            header("Location: verify.php");
+            exit();
+        } catch (Exception $e) {
+            echo 'Feil ved sending av e-post: ' . $e->getMessage();
+        }
     } else {
         echo "Feil e-postadresse eller passord.";
     }
